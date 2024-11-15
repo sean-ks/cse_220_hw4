@@ -21,15 +21,10 @@ typedef struct {
 typedef struct {
     int socket;
     Piece pieces[5];
+    int joined_game;
+    int initialized;
 } Player;
 
-// Helper function to send the same message to both clients
-void send_to_both_players(Player *players, const char *message) {
-    // Send message to Player 1
-    send(players[0].socket, message, strlen(message), 0);
-    // Send message to Player 2
-    send(players[1].socket, message, strlen(message), 0);
-}
 
 int main() {
     int listen_fd1, listen_fd2, new_socket;
@@ -38,6 +33,10 @@ int main() {
     int opt = 1;
     char buffer[BUFFER_SIZE] = {0};
     Player players[MAX_PLAYERS];
+    players[0].joined_game = 0;
+    players[1].joined_game = 0;
+    players[0].initialized = 0;
+    players[1].initialized = 0;
 
     // Create two separate server sockets: one for Player 1, one for Player 2
     if ((listen_fd1 = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -125,29 +124,57 @@ int main() {
             printf("[Server] Received from Player %d: %s\n",current_player, buffer);
             if (strncmp(buffer, "F", 1) == 0 && current_player == 0) {
                 printf("[Server] Player %d forfeits\n",current_player);
-                send(players[0].socket, "H 0\0", 3, 0);
-                send(players[1].socket, "H 1\0", 3, 0);
+                send(players[0].socket, "H 0\0", 4, 0);
+                send(players[1].socket, "H 1\0", 4, 0);
                 break;
             }
             else if (strncmp(buffer, "F", 1) == 0 && current_player == 1) {
                 printf("[Server] Player %d forfeits\n",current_player);
-                send(players[0].socket, "H 1\0", 3, 0);
-                send(players[1].socket, "H 0\0", 3, 0);
+                send(players[0].socket, "H 1\0", 4, 0);
+                send(players[1].socket, "H 0\0", 4, 0);
                 break;
             }
-            else if(strncmp(buffer, "B", 1) == 0 && current_player == 0){
+            else if(strncmp(buffer, "B", 1) == 0 && current_player == 0 && players[current_player].joined_game == 0){
                 int width = 0;
                 int height = 0;
                 sscanf(buffer, "B %d %d", &width, &height);
+                if(width < 10 || height < 10){
+                    send(players[0].socket, "E 200\0", 6, 0);
+                    continue;
+                }
+                players[current_player].joined_game = 1;
                 board = malloc(sizeof(char)*width*height);
-                send_to_both_players(players, "board initialized\0");
+                send(players[0].socket, "A\0", 2, 0);
                 //initialize pieces
             }
-            else if(strncmp(buffer, "B", 1) == 0){
-                send_to_both_players(players, "Player 2 joined\0");
+            else if(strcmp(buffer, "B") == 0 && players[current_player].joined_game == 0){
+                send(players[current_player].socket, "A\0", 2, 0);
+                players[current_player].joined_game = 1;
             }
-            else{
-                send_to_both_players(players, "A\0");
+            else if(players[current_player].joined_game == 0){
+                send(players[current_player].socket, "E 100\0", 6, 0);
+                continue;
+            }
+            else if(strncmp(buffer, "I", 1) == 0 && players[current_player].initialized == 0){
+                int pieces[22] = {0};
+                if(sscanf(buffer, "I %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
+                 &pieces[0], &pieces[1], &pieces[2], &pieces[3], &pieces[4], &pieces[5],&pieces[6], &pieces[7], &pieces[8], &pieces[9], 
+                 &pieces[10], &pieces[11], &pieces[12], &pieces[13], &pieces[14], &pieces[15],&pieces[16], &pieces[17], &pieces[18], &pieces[19], &pieces[20]) != 20){
+                    send(players[current_player].socket, "E 201\0", 6, 0);
+                    continue;
+                }
+                for(int i = 0; i < 5; i++){
+                    players[current_player].pieces[i].piece_type = pieces[i*4];
+                    players[current_player].pieces[i].piece_rotation = pieces[i*4 + 1];
+                    players[current_player].pieces[i].piece_column = pieces[i*4 + 2];
+                    players[current_player].pieces[i].piece_row = pieces[i*4 + 3];
+                }
+                send(players[current_player].socket, "A\0", 2, 0);
+                players[current_player].initialized = 1;
+            }
+            else if(players[current_player].initialized == 0){
+                send(players[current_player].socket, "E 201\0", 6, 0);
+                continue;
             }
             // printf("[Server] Enter message: ");
             // memset(buffer, 0, BUFFER_SIZE);
